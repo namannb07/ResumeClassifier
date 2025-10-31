@@ -8,22 +8,10 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 import PyPDF2
-import io
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
-
-# Sklearn imports
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
-from sklearn.preprocessing import LabelEncoder
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from xgboost import XGBClassifier
-
+from collections import Counter
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -35,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI
+# Custom CSS
 st.markdown("""
     <style>
     .main-header {
@@ -76,13 +64,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# NLTK downloads - FIXED VERSION
+# NLTK downloads
 @st.cache_resource
 def download_nltk_data():
-    """Download required NLTK data packages with error handling"""
+    """Download required NLTK data packages"""
     import ssl
-    
-    # Handle SSL certificate issues
     try:
         _create_unverified_https_context = ssl._create_unverified_context
     except AttributeError:
@@ -90,7 +76,6 @@ def download_nltk_data():
     else:
         ssl._create_default_https_context = _create_unverified_https_context
     
-    # List of required packages
     packages = {
         'punkt_tab': 'tokenizers/punkt_tab',
         'punkt': 'tokenizers/punkt',
@@ -104,32 +89,53 @@ def download_nltk_data():
             nltk.data.find(package_path)
         except LookupError:
             try:
-                print(f"Downloading {package_name}...")
                 nltk.download(package_name, quiet=True)
-            except Exception as e:
-                print(f"Warning: Could not download {package_name}: {e}")
-                # Continue even if one package fails
+            except:
                 pass
 
 download_nltk_data()
 
-# Initialize session state
-if 'models_trained' not in st.session_state:
-    st.session_state.models_trained = False
-if 'vectorizer' not in st.session_state:
-    st.session_state.vectorizer = None
-if 'label_encoder' not in st.session_state:
-    st.session_state.label_encoder = None
-if 'models' not in st.session_state:
-    st.session_state.models = {}
-if 'model_results' not in st.session_state:
-    st.session_state.model_results = {}
-if 'dataset' not in st.session_state:
-    st.session_state.dataset = None
-if 'categories' not in st.session_state:
-    st.session_state.categories = []
+# Load pre-trained models
+@st.cache_resource
+def load_pretrained_models():
+    """Load all pre-trained models from pickle files"""
+    models_dir = 'models'
+    
+    try:
+        # Load vectorizer
+        with open(f'{models_dir}/vectorizer.pkl', 'rb') as f:
+            vectorizer = pickle.load(f)
+        
+        # Load label encoder
+        with open(f'{models_dir}/label_encoder.pkl', 'rb') as f:
+            label_encoder = pickle.load(f)
+        
+        # Load categories
+        with open(f'{models_dir}/categories.pkl', 'rb') as f:
+            categories = pickle.load(f)
+        
+        # Load all models
+        model_files = {
+            'Logistic Regression': 'LogisticRegression.pkl',
+            'Random Forest': 'RandomForest.pkl',
+            'SVM': 'SVM.pkl',
+            'Naive Bayes': 'NaiveBayes.pkl',
+            'XGBoost': 'XGBoost.pkl'
+        }
+        
+        models = {}
+        for name, filename in model_files.items():
+            with open(f'{models_dir}/{filename}', 'rb') as f:
+                models[name] = pickle.load(f)
+        
+        return vectorizer, label_encoder, categories, models, None
+    
+    except FileNotFoundError as e:
+        return None, None, None, None, f"Model files not found: {e}"
+    except Exception as e:
+        return None, None, None, None, f"Error loading models: {e}"
 
-# Text preprocessing function
+# Text preprocessing
 @st.cache_data
 def clean_text(text):
     """Clean and preprocess resume text"""
@@ -142,7 +148,7 @@ def clean_text(text):
     tokens = [lemmatizer.lemmatize(w) for w in tokens if w not in stop_words and len(w) > 2]
     return " ".join(tokens)
 
-# PDF text extraction
+# PDF extraction
 def extract_text_from_pdf(pdf_file):
     """Extract text from uploaded PDF file"""
     try:
@@ -155,109 +161,30 @@ def extract_text_from_pdf(pdf_file):
         st.error(f"Error reading PDF: {e}")
         return None
 
-# Load dataset from local file
-@st.cache_data
-def load_dataset_from_file(filename="UpdatedResumeDataSet.csv"):
-    """Load dataset from local CSV file"""
-    try:
-        if os.path.exists(filename):
-            df = pd.read_csv(filename)
-            return df, None
-        else:
-            return None, f"Dataset file '{filename}' not found in the current directory."
-    except Exception as e:
-        return None, f"Error loading dataset: {e}"
-
-# Train models
-def train_models(dataset, progress_bar=None):
-    """Train all classification models"""
-    
-    # Preprocess data
-    if progress_bar:
-        progress_bar.progress(10, text="Preprocessing text data...")
-    
-    dataset['cleaned'] = dataset['Resume'].apply(clean_text)
-    
-    # TF-IDF Vectorization
-    if progress_bar:
-        progress_bar.progress(20, text="Creating TF-IDF features...")
-    
-    vectorizer = TfidfVectorizer(
-        max_features=3000,
-        min_df=2,
-        max_df=0.8,
-        ngram_range=(1,2),
-        stop_words='english'
-    )
-    
-    X = dataset['cleaned']
-    y = dataset['Category']
-    X_tfidf = vectorizer.fit_transform(X)
-    
-    # Train-test split
-    if progress_bar:
-        progress_bar.progress(30, text="Splitting data...")
-    
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_tfidf, y, test_size=0.2, random_state=42, stratify=y
-    )
-    
-    # Label encoding
-    le = LabelEncoder()
-    y_train_enc = le.fit_transform(y_train)
-    y_test_enc = le.transform(y_test)
-    
-    # Define models
-    models = {
-        'Logistic Regression': LogisticRegression(max_iter=1000, C=0.5, random_state=42),
-        'Random Forest': RandomForestClassifier(n_estimators=100, max_depth=20, random_state=42),
-        'SVM': SVC(C=1.0, kernel='linear', probability=True, random_state=42),
-        'Naive Bayes': MultinomialNB(alpha=0.1),
-        'XGBoost': XGBClassifier(max_depth=6, learning_rate=0.1, random_state=42, 
-                                 use_label_encoder=False, eval_metric='mlogloss')
-    }
-    
-    # Train models
-    results = {}
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    
-    progress_step = 50 / len(models)
-    current_progress = 30
-    
-    for name, model in models.items():
-        if progress_bar:
-            current_progress += progress_step
-            progress_bar.progress(int(current_progress), text=f"Training {name}...")
-        
-        # Cross-validation
-        cv_scores = cross_val_score(model, X_train, y_train_enc, cv=cv, scoring='accuracy')
-        
-        # Train model
-        model.fit(X_train, y_train_enc)
-        
-        # Predictions
-        y_pred_enc = model.predict(X_test)
-        y_pred = le.inverse_transform(y_pred_enc)
-        
-        # Store results
-        results[name] = {
-            'model': model,
-            'y_pred': y_pred,
-            'accuracy': accuracy_score(y_test, y_pred),
-            'cv_mean': cv_scores.mean(),
-            'cv_std': cv_scores.std()
-        }
-    
-    if progress_bar:
-        progress_bar.progress(100, text="Training complete!")
-    
-    return vectorizer, le, models, results, (X_test, y_test)
-
 # Main App
 def main():
+    # Load models on startup
+    vectorizer, label_encoder, categories, models, error = load_pretrained_models()
+    
     # Header
     st.markdown('<div class="main-header">🎯 AI-Powered Resume Classification System</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">Automatically categorize resumes using Machine Learning</div>', unsafe_allow_html=True)
+    
+    # Check if models loaded
+    if error:
+        st.error(f"❌ {error}")
+        st.info("""
+        **Missing model files!** Please ensure the following files are in the `models/` directory:
+        - LogisticRegression.pkl
+        - RandomForest.pkl
+        - SVM.pkl
+        - NaiveBayes.pkl
+        - XGBoost.pkl
+        - vectorizer.pkl
+        - label_encoder.pkl
+        - categories.pkl
+        """)
+        return
     
     # Sidebar
     with st.sidebar:
@@ -266,222 +193,77 @@ def main():
         
         page = st.radio("Select Page", [
             "🏠 Home",
-            "📊 Model Training",
             "🔍 Resume Classification",
-            "📈 Model Performance",
+            "📊 Model Information",
             "ℹ️ About"
         ])
         
         st.markdown("---")
         st.markdown("### 📌 Quick Info")
-        st.info(f"""
-        **Training Status:** {'✅ Trained' if st.session_state.models_trained else '❌ Not Trained'}
+        st.success(f"""
+        **Status:** ✅ Models Loaded
         
-        **Categories:** {len(st.session_state.categories) if st.session_state.categories else 0}
+        **Categories:** {len(categories)}
         
-        **Models:** 5 classifiers
+        **Models:** {len(models)} classifiers
         """)
     
     # Page routing
     if page == "🏠 Home":
-        show_home_page()
-    elif page == "📊 Model Training":
-        show_training_page()
+        show_home_page(categories)
     elif page == "🔍 Resume Classification":
-        show_classification_page()
-    elif page == "📈 Model Performance":
-        show_performance_page()
+        show_classification_page(vectorizer, label_encoder, models)
+    elif page == "📊 Model Information":
+        show_model_info_page(categories, models)
     elif page == "ℹ️ About":
         show_about_page()
 
-def show_home_page():
-    """Home page with introduction"""
-    
+def show_home_page(categories):
+    """Home page"""
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
         st.markdown("""
         ## Welcome to Resume Classifier! 👋
         
-        This application uses advanced **Machine Learning algorithms** to automatically 
+        This application uses **pre-trained Machine Learning models** to automatically 
         classify resumes into different job categories.
         
         ### 🎯 Key Features:
         
-        - **Multi-Model Approach**: Uses 5 different ML algorithms
-        - **High Accuracy**: Trained on comprehensive resume dataset
+        - **5 Pre-trained Models**: Logistic Regression, Random Forest, SVM, Naive Bayes, XGBoost
+        - **Fast Predictions**: No training required - instant results
         - **PDF Support**: Upload resumes in PDF format
-        - **Real-time Prediction**: Get instant classification results
-        - **Detailed Analytics**: View model performance metrics
+        - **Consensus Prediction**: See agreement across all models
+        - **High Accuracy**: Models trained on comprehensive dataset
         
         ### 🚀 How to Use:
         
-        1. **Train Models**: Go to Model Training page and load dataset
-        2. **Upload Resume**: Navigate to Resume Classification page
-        3. **Get Results**: View predictions from all models
-        4. **Analyze Performance**: Check model metrics
+        1. Navigate to **Resume Classification** page
+        2. Upload a PDF resume
+        3. Get instant predictions from all 5 models
+        4. View consensus result and individual predictions
         
-        ### 📊 Supported Models:
-        
-        - Logistic Regression
-        - Random Forest Classifier
-        - Support Vector Machine (SVM)
-        - Naive Bayes
-        - XGBoost Classifier
+        ### 📋 Supported Categories:
         """)
         
-        if not st.session_state.models_trained:
-            st.warning("⚠️ **Models not trained yet!** Please go to the Model Training page.")
-            if st.button("Go to Training Page"):
-                st.rerun()
+        # Display categories in columns
+        num_cols = 3
+        cols = st.columns(num_cols)
+        for idx, category in enumerate(sorted(categories)):
+            with cols[idx % num_cols]:
+                st.markdown(f"✅ {category}")
 
-def show_training_page():
-    """Model training page"""
-    
-    st.header("📊 Model Training Dashboard")
-    
-    st.markdown("""
-    <div class="info-box">
-    <b>ℹ️ Training Information:</b><br>
-    This process will load the dataset from the local directory and train 5 different ML models.
-    Training may take a few minutes depending on dataset size.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Dataset configuration
-    st.subheader("1️⃣ Dataset Configuration")
-    
-    # Check if dataset exists
-    dataset_filename = "UpdatedResumeDataSet.csv"
-    dataset_exists = os.path.exists(dataset_filename)
-    
-    if dataset_exists:
-        st.success(f"✅ Dataset file found: `{dataset_filename}`")
-    else:
-        st.error(f"❌ Dataset file not found: `{dataset_filename}`")
-        st.info("Please ensure `UpdatedResumeDataSet.csv` is in the same directory as `app.py`")
-        return
-    
-    # Load dataset button
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    with col2:
-        if st.button("🔄 Load Dataset", use_container_width=True):
-            with st.spinner("Loading dataset from local file..."):
-                dataset, error = load_dataset_from_file(dataset_filename)
-                
-                if dataset is not None:
-                    st.session_state.dataset = dataset
-                    st.session_state.categories = dataset['Category'].unique().tolist()
-                    st.success(f"✅ Dataset loaded successfully! ({len(dataset)} resumes)")
-                else:
-                    st.error(f"❌ {error}")
-    
-    # Display dataset info
-    if st.session_state.dataset is not None:
-        st.subheader("2️⃣ Dataset Overview")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Resumes", len(st.session_state.dataset))
-        with col2:
-            st.metric("Categories", st.session_state.dataset['Category'].nunique())
-        with col3:
-            st.metric("Columns", len(st.session_state.dataset.columns))
-        with col4:
-            st.metric("Status", "✅ Ready")
-        
-        # Category distribution
-        st.subheader("📊 Category Distribution")
-        
-        category_counts = st.session_state.dataset['Category'].value_counts()
-        
-        fig = px.bar(
-            x=category_counts.index,
-            y=category_counts.values,
-            labels={'x': 'Category', 'y': 'Count'},
-            title='Resume Distribution by Category',
-            color=category_counts.values,
-            color_continuous_scale='Viridis'
-        )
-        fig.update_layout(showlegend=False, xaxis_tickangle=-45)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Sample data
-        with st.expander("🔍 View Sample Data"):
-            st.dataframe(st.session_state.dataset.head(10))
-        
-        # Train models button
-        st.subheader("3️⃣ Model Training")
-        
-        col1, col2, col3 = st.columns([1, 1, 1])
-        
-        with col2:
-            if st.button("🚀 Train All Models", use_container_width=True, type="primary"):
-                progress_bar = st.progress(0, text="Initializing training...")
-                
-                try:
-                    vectorizer, le, models, results, test_data = train_models(
-                        st.session_state.dataset,
-                        progress_bar
-                    )
-                    
-                    # Store in session state
-                    st.session_state.vectorizer = vectorizer
-                    st.session_state.label_encoder = le
-                    st.session_state.models = models
-                    st.session_state.model_results = results
-                    st.session_state.models_trained = True
-                    
-                    st.success("🎉 All models trained successfully!")
-                    
-                    # Display results
-                    st.subheader("📈 Training Results")
-                    
-                    results_df = pd.DataFrame({
-                        'Model': list(results.keys()),
-                        'Test Accuracy': [results[name]['accuracy'] for name in results.keys()],
-                        'CV Mean': [results[name]['cv_mean'] for name in results.keys()],
-                        'CV Std': [results[name]['cv_std'] for name in results.keys()]
-                    }).sort_values('Test Accuracy', ascending=False)
-                    
-                    st.dataframe(
-                        results_df.style.highlight_max(subset=['Test Accuracy', 'CV Mean'], color='lightgreen')
-                        .format({'Test Accuracy': '{:.4f}', 'CV Mean': '{:.4f}', 'CV Std': '{:.4f}'}),
-                        use_container_width=True
-                    )
-                    
-                    # Best model
-                    best_model = results_df.iloc[0]['Model']
-                    best_accuracy = results_df.iloc[0]['Test Accuracy']
-                    
-                    st.balloons()
-                    st.success(f"🏆 **Best Model:** {best_model} with {best_accuracy:.2%} accuracy")
-                    
-                except Exception as e:
-                    st.error(f"❌ Training failed: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
-    else:
-        st.info("👆 Please load the dataset first to proceed with training.")
-
-def show_classification_page():
+def show_classification_page(vectorizer, label_encoder, models):
     """Resume classification page"""
     
     st.header("🔍 Resume Classification")
-    
-    if not st.session_state.models_trained:
-        st.warning("⚠️ Models are not trained yet. Please train the models first!")
-        if st.button("Go to Training Page"):
-            st.rerun()
-        return
     
     st.markdown("""
     <div class="info-box">
     <b>📄 Upload a Resume:</b><br>
     Upload a PDF resume to classify it into one of the job categories.
-    The system will analyze the resume using all 5 trained models.
+    The system will analyze the resume using all 5 pre-trained models.
     </div>
     """, unsafe_allow_html=True)
     
@@ -515,15 +297,15 @@ def show_classification_page():
                 # Preprocess
                 with st.spinner("Preprocessing text..."):
                     cleaned_text = clean_text(resume_text)
-                    text_vec = st.session_state.vectorizer.transform([cleaned_text])
+                    text_vec = vectorizer.transform([cleaned_text])
                 
                 # Predictions
                 st.subheader("🎯 Classification Results")
                 
                 predictions = {}
-                for model_name, model in st.session_state.models.items():
+                for model_name, model in models.items():
                     pred_enc = model.predict(text_vec)[0]
-                    pred_label = st.session_state.label_encoder.inverse_transform([pred_enc])[0]
+                    pred_label = label_encoder.inverse_transform([pred_enc])[0]
                     
                     if hasattr(model, "predict_proba"):
                         prob = np.max(model.predict_proba(text_vec))
@@ -535,9 +317,8 @@ def show_classification_page():
                         'confidence': prob
                     }
                 
-                # Find consensus prediction
+                # Consensus prediction
                 pred_categories = [pred['category'] for pred in predictions.values()]
-                from collections import Counter
                 most_common = Counter(pred_categories).most_common(1)[0]
                 consensus_category = most_common[0]
                 consensus_count = most_common[1]
@@ -553,7 +334,7 @@ def show_classification_page():
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Individual model predictions
+                # Individual predictions
                 st.subheader("🤖 Individual Model Predictions")
                 
                 cols = st.columns(len(predictions))
@@ -569,7 +350,7 @@ def show_classification_page():
                         </div>
                         """, unsafe_allow_html=True)
                 
-                # Detailed predictions table
+                # Detailed table
                 st.subheader("📋 Detailed Predictions")
                 
                 pred_df = pd.DataFrame({
@@ -581,7 +362,7 @@ def show_classification_page():
                 
                 st.dataframe(pred_df, use_container_width=True)
                 
-                # Download results
+                # Download button
                 st.download_button(
                     label="📥 Download Results (CSV)",
                     data=pred_df.to_csv(index=False),
@@ -589,181 +370,76 @@ def show_classification_page():
                     mime="text/csv"
                 )
 
-def show_performance_page():
-    """Model performance page"""
+def show_model_info_page(categories, models):
+    """Model information page"""
     
-    st.header("📈 Model Performance Analysis")
+    st.header("📊 Model Information")
     
-    if not st.session_state.models_trained:
-        st.warning("⚠️ Models are not trained yet. Please train the models first!")
-        return
+    st.subheader("🤖 Loaded Models")
     
-    results = st.session_state.model_results
-    
-    # Overall metrics
-    st.subheader("🎯 Overall Model Comparison")
-    
-    results_df = pd.DataFrame({
-        'Model': list(results.keys()),
-        'Test Accuracy': [results[name]['accuracy'] for name in results.keys()],
-        'CV Mean Accuracy': [results[name]['cv_mean'] for name in results.keys()],
-        'CV Std': [results[name]['cv_std'] for name in results.keys()]
-    }).sort_values('Test Accuracy', ascending=False)
-    
-    # Metrics cards
-    col1, col2, col3, col4 = st.columns(4)
-    
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Best Model", results_df.iloc[0]['Model'])
+        st.metric("Total Models", len(models))
     with col2:
-        st.metric("Best Accuracy", f"{results_df.iloc[0]['Test Accuracy']:.2%}")
+        st.metric("Categories", len(categories))
     with col3:
-        st.metric("Average Accuracy", f"{results_df['Test Accuracy'].mean():.2%}")
-    with col4:
-        st.metric("Models Trained", len(results))
+        st.metric("Status", "✅ Ready")
     
-    # Accuracy comparison chart
-    fig = go.Figure()
+    st.markdown("### Model Details")
     
-    fig.add_trace(go.Bar(
-        name='Test Accuracy',
-        x=results_df['Model'],
-        y=results_df['Test Accuracy'],
-        marker_color='skyblue'
-    ))
+    model_info = pd.DataFrame({
+        'Model Name': list(models.keys()),
+        'Type': ['Linear', 'Ensemble', 'SVM', 'Probabilistic', 'Boosting'],
+        'Supports Probability': ['✅' if hasattr(model, 'predict_proba') else '❌' 
+                                 for model in models.values()]
+    })
     
-    fig.add_trace(go.Bar(
-        name='CV Mean Accuracy',
-        x=results_df['Model'],
-        y=results_df['CV Mean Accuracy'],
-        marker_color='salmon',
-        error_y=dict(
-            type='data',
-            array=results_df['CV Std'],
-            visible=True
-        )
-    ))
+    st.dataframe(model_info, use_container_width=True)
     
-    fig.update_layout(
-        title='Model Performance Comparison',
-        xaxis_title='Model',
-        yaxis_title='Accuracy',
-        barmode='group',
-        yaxis=dict(range=[0, 1])
-    )
+    st.markdown("### 📋 Supported Categories")
     
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Detailed metrics table
-    st.subheader("📊 Detailed Metrics")
-    
-    st.dataframe(
-        results_df.style.highlight_max(subset=['Test Accuracy', 'CV Mean Accuracy'], color='lightgreen')
-        .format({'Test Accuracy': '{:.4f}', 'CV Mean Accuracy': '{:.4f}', 'CV Std': '{:.4f}'}),
-        use_container_width=True
-    )
-    
-    # Categories
-    st.subheader("📋 Supported Categories")
-    
-    if st.session_state.categories:
-        num_cols = 3
-        cols = st.columns(num_cols)
-        
-        for idx, category in enumerate(sorted(st.session_state.categories)):
-            with cols[idx % num_cols]:
-                st.markdown(f"✅ {category}")
+    num_cols = 3
+    cols = st.columns(num_cols)
+    for idx, category in enumerate(sorted(categories)):
+        with cols[idx % num_cols]:
+            st.markdown(f"✅ {category}")
 
 def show_about_page():
-    """About page with project information"""
+    """About page"""
     
     st.header("ℹ️ About This Project")
     
     st.markdown("""
     ## 🎓 Resume Classification System
     
-    This application demonstrates the power of **Machine Learning** in automating 
-    the resume screening process. It uses multiple classification algorithms to 
-    categorize resumes into different job domains.
+    This application uses **pre-trained Machine Learning models** to automatically 
+    classify resumes into different job categories.
     
     ### 🔬 Technical Details
     
-    #### **Machine Learning Pipeline:**
-    
-    1. **Text Preprocessing**
-       - Lowercasing
-       - Special character removal
-       - Tokenization
-       - Stopword removal
-       - Lemmatization
-    
-    2. **Feature Extraction**
-       - TF-IDF Vectorization
-       - N-gram features (1-gram and 2-gram)
-       - Max features: 3000
-    
-    3. **Model Training**
-       - 5 different algorithms
-       - 5-fold cross-validation
-       - Stratified train-test split (80-20)
-    
     #### **Models Used:**
-    
-    - **Logistic Regression**: Linear model with regularization
-    - **Random Forest**: Ensemble of decision trees
+    - **Logistic Regression**: Linear classification with regularization
+    - **Random Forest**: Ensemble of 100 decision trees
     - **SVM**: Support Vector Machine with linear kernel
-    - **Naive Bayes**: Probabilistic classifier
-    - **XGBoost**: Gradient boosting algorithm
+    - **Naive Bayes**: Multinomial probabilistic classifier
+    - **XGBoost**: Gradient boosting with depth 6
     
-    ### 📊 Dataset Information
+    #### **Features:**
+    - TF-IDF vectorization (3000 features)
+    - N-gram range: 1-2
+    - Text preprocessing: lemmatization, stopword removal
     
-    The model is trained on a comprehensive dataset containing resumes from 
-    multiple job categories including:
-    
-    - Data Science
-    - Web Development
-    - Database Administration
-    - DevOps Engineering
-    - Business Analysis
-    - And many more...
-    
-    ### 🛠️ Technologies Used
+    ### 🛠️ Technologies
     
     - **Frontend**: Streamlit
     - **ML Libraries**: scikit-learn, XGBoost
     - **NLP**: NLTK
-    - **Data Processing**: Pandas, NumPy
-    - **Visualization**: Plotly
     - **PDF Processing**: PyPDF2
+    - **Visualization**: Plotly
     
-    ### 👨‍💻 Developer Information
+    ### 📝 Deployment
     
-    **Project**: Resume Classification System  
-    **Purpose**: Internal Demonstration / Academic Project  
-    **Technology Stack**: Python, Streamlit, Machine Learning  
-    **Dataset**: Local CSV file (UpdatedResumeDataSet.csv)
-    
-    ### 📝 Usage Instructions
-    
-    1. Ensure `UpdatedResumeDataSet.csv` is in the same directory as `app.py`
-    2. Navigate to **Model Training** page
-    3. Click **Load Dataset** to load local data
-    4. Click **Train All Models** to train classifiers
-    5. Go to **Resume Classification** page
-    6. Upload a resume PDF
-    7. View predictions from all models
-    
-    ### 🔒 Privacy & Security
-    
-    - All processing is done locally
-    - No data is stored permanently
-    - Resume content is processed in-memory only
-    - Models are trained on publicly available datasets
-    
-    ### 📧 Contact & Feedback
-    
-    For questions, suggestions, or feedback about this project, please contact 
-    the development team.
+    Models are pre-trained and stored as pickle files for fast loading and inference.
     
     ---
     
