@@ -1,0 +1,14 @@
+altair
+argon2-cffi
+attrs
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+xgboost
+nltk
+python-docx
+PyPDF2
+streamlit
