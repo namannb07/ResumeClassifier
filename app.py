@@ -132,16 +132,18 @@ def extract_text_from_pdf(pdf_file):
         st.error(f"Error reading PDF: {e}")
         return None
 
-# Load dataset from GitHub
+# Load dataset from local file
 @st.cache_data
-def load_dataset_from_github(github_url):
-    """Load dataset from GitHub raw URL"""
+def load_dataset_from_file(filename="UpdatedResumeDataSet.csv"):
+    """Load dataset from local CSV file"""
     try:
-        df = pd.read_csv(github_url)
-        return df
+        if os.path.exists(filename):
+            df = pd.read_csv(filename)
+            return df, None
+        else:
+            return None, f"Dataset file '{filename}' not found in the current directory."
     except Exception as e:
-        st.error(f"Error loading dataset: {e}")
-        return None
+        return None, f"Error loading dataset: {e}"
 
 # Train models
 def train_models(dataset, progress_bar=None):
@@ -318,38 +320,39 @@ def show_training_page():
     st.markdown("""
     <div class="info-box">
     <b>ℹ️ Training Information:</b><br>
-    This process will download the dataset from GitHub and train 5 different ML models.
+    This process will load the dataset from the local directory and train 5 different ML models.
     Training may take a few minutes depending on dataset size.
     </div>
     """, unsafe_allow_html=True)
     
-    # Dataset URL input
+    # Dataset configuration
     st.subheader("1️⃣ Dataset Configuration")
     
-    default_url = "https://github.com/namannb07/ResumeClassifier/blob/main/UpdatedResumeDataSet.csv"
-    github_url = st.text_input(
-        "Enter GitHub Raw URL for Dataset",
-        value=default_url,
-        help="Paste the raw GitHub URL of your UpdatedResumeDataSet.csv file"
-    )
+    # Check if dataset exists
+    dataset_filename = "UpdatedResumeDataSet.csv"
+    dataset_exists = os.path.exists(dataset_filename)
     
-    st.markdown("**Example URL format:**")
-    st.code("https://raw.githubusercontent.com/username/repository/branch/UpdatedResumeDataSet.csv")
+    if dataset_exists:
+        st.success(f"✅ Dataset file found: `{dataset_filename}`")
+    else:
+        st.error(f"❌ Dataset file not found: `{dataset_filename}`")
+        st.info("Please ensure `UpdatedResumeDataSet.csv` is in the same directory as `app.py`")
+        return
     
     # Load dataset button
     col1, col2, col3 = st.columns([1, 1, 1])
     
     with col2:
         if st.button("🔄 Load Dataset", use_container_width=True):
-            with st.spinner("Loading dataset from GitHub..."):
-                dataset = load_dataset_from_github(github_url)
+            with st.spinner("Loading dataset from local file..."):
+                dataset, error = load_dataset_from_file(dataset_filename)
                 
                 if dataset is not None:
                     st.session_state.dataset = dataset
                     st.session_state.categories = dataset['Category'].unique().tolist()
                     st.success(f"✅ Dataset loaded successfully! ({len(dataset)} resumes)")
                 else:
-                    st.error("❌ Failed to load dataset. Please check the URL.")
+                    st.error(f"❌ {error}")
     
     # Display dataset info
     if st.session_state.dataset is not None:
@@ -713,13 +716,13 @@ def show_about_page():
     **Project**: Resume Classification System  
     **Purpose**: Internal Demonstration / Academic Project  
     **Technology Stack**: Python, Streamlit, Machine Learning  
-    **Dataset Source**: GitHub Repository
+    **Dataset**: Local CSV file (UpdatedResumeDataSet.csv)
     
     ### 📝 Usage Instructions
     
-    1. Navigate to **Model Training** page
-    2. Enter GitHub raw URL for the dataset
-    3. Click **Load Dataset** to fetch data
+    1. Ensure `UpdatedResumeDataSet.csv` is in the same directory as `app.py`
+    2. Navigate to **Model Training** page
+    3. Click **Load Dataset** to load local data
     4. Click **Train All Models** to train classifiers
     5. Go to **Resume Classification** page
     6. Upload a resume PDF
