@@ -76,17 +76,40 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# NLTK downloads
+# NLTK downloads - FIXED VERSION
 @st.cache_resource
 def download_nltk_data():
+    """Download required NLTK data packages with error handling"""
+    import ssl
+    
+    # Handle SSL certificate issues
     try:
-        nltk.data.find('tokenizers/punkt')
-        nltk.data.find('corpora/stopwords')
-        nltk.data.find('corpora/wordnet')
-    except LookupError:
-        nltk.download('punkt')
-        nltk.download('stopwords')
-        nltk.download('wordnet')
+        _create_unverified_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
+    
+    # List of required packages
+    packages = {
+        'punkt_tab': 'tokenizers/punkt_tab',
+        'punkt': 'tokenizers/punkt',
+        'stopwords': 'corpora/stopwords',
+        'wordnet': 'corpora/wordnet',
+        'omw-1.4': 'corpora/omw-1.4'
+    }
+    
+    for package_name, package_path in packages.items():
+        try:
+            nltk.data.find(package_path)
+        except LookupError:
+            try:
+                print(f"Downloading {package_name}...")
+                nltk.download(package_name, quiet=True)
+            except Exception as e:
+                print(f"Warning: Could not download {package_name}: {e}")
+                # Continue even if one package fails
+                pass
 
 download_nltk_data()
 
@@ -438,6 +461,8 @@ def show_training_page():
                     
                 except Exception as e:
                     st.error(f"❌ Training failed: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
     else:
         st.info("👆 Please load the dataset first to proceed with training.")
 
