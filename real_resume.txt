@@ -1,0 +1,1 @@
+Python Developer with experience in Django, Flask, Pandas, and Scikit-learn. Developed machine learning models.

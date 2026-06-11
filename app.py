@@ -11,6 +11,7 @@ import PyPDF2
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import urllib.parse
 from collections import Counter
 import warnings
 warnings.filterwarnings('ignore')
@@ -334,6 +335,37 @@ def show_classification_page(vectorizer, label_encoder, models):
                 </div>
                 """, unsafe_allow_html=True)
                 
+                # LinkedIn Job Search Section
+                st.subheader("💼 Find Jobs on LinkedIn")
+
+                st.markdown(f"Search for **{consensus_category}** roles on LinkedIn:")
+
+                col_loc1, col_loc2 = st.columns([2, 1])
+
+                with col_loc1:
+                    predefined_locations = ["Remote", "United States", "India", "United Kingdom", "Canada", "Australia", "Europe", "Other"]
+                    selected_loc = st.selectbox("Select Location", predefined_locations)
+
+                    if selected_loc == "Other":
+                        custom_loc = st.text_input("Enter custom location")
+                        search_loc = custom_loc
+                    else:
+                        search_loc = selected_loc
+
+                with col_loc2:
+                    st.markdown("<br>", unsafe_allow_html=True) # Spacer to align button
+                    if search_loc:
+                        # Construct LinkedIn job search URL
+                        encoded_role = urllib.parse.quote(consensus_category)
+                        encoded_loc = urllib.parse.quote(search_loc)
+                        linkedin_url = f"https://www.linkedin.com/jobs/search/?keywords={encoded_role}&location={encoded_loc}"
+
+                        st.link_button(f"🔍 Search Jobs in {search_loc}", linkedin_url, type="primary", use_container_width=True)
+                    else:
+                        st.button("🔍 Search Jobs", disabled=True, use_container_width=True)
+
+                st.markdown("---")
+
                 # Individual predictions
                 st.subheader("🤖 Individual Model Predictions")
                 
