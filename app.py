@@ -573,18 +573,20 @@ def show_job_results(category):
                 # LinkedIn apply URL
                 linkedin_url = build_linkedin_apply_url(job['title'], job['company'])
 
-                st.markdown(f"""
-                <div class="job-card">
-                    <div class="job-title">{job['title']}</div>
-                    <div class="job-company">🏢 {job['company']}</div>
-                    <div class="job-location">📍 {job['location']}</div>
-                    {f'<div class="job-salary">{salary_str}</div>' if salary_str else ''}
-                    <div class="job-desc">{desc}</div>
-                    <a href="{linkedin_url}" target="_blank" class="apply-btn">
-                        🔗 Apply on LinkedIn
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
+                html_str = f"""<div class="job-card">
+<div class="job-title">{job['title']}</div>
+<div class="job-company">🏢 {job['company']}</div>
+<div class="job-location">📍 {job['location']}</div>"""
+
+                if salary_str:
+                    html_str += f'\n<div class="job-salary">{salary_str}</div>'
+
+                html_str += f"""
+<div class="job-desc">{desc}</div>
+<a href="{linkedin_url}" target="_blank" class="apply-btn">🔗 Apply on LinkedIn</a>
+</div>"""
+
+                st.markdown(html_str, unsafe_allow_html=True)
         else:
             st.warning("No jobs found from Adzuna. Try the LinkedIn search below!")
     else:
