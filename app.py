@@ -397,8 +397,7 @@ def show_classification_page(vectorizer, label_encoder, models):
         with col3:
             st.info(f"**Type:** {uploaded_file.type}")
         
-        # Classify button
-        if st.button("🎯 Classify Resume", use_container_width=True, type="primary"):
+        if st.button("🎯 Classify Resume", width='stretch', type="primary"):
             with st.spinner("Extracting text from PDF..."):
                 resume_text = extract_text_from_pdf(uploaded_file)
             
@@ -419,6 +418,10 @@ def show_classification_page(vectorizer, label_encoder, models):
                 failed_models = []
                 for model_name, model in models.items():
                     try:
+                        # Compatibility patch for older scikit-learn SVM models loaded in newer versions
+                        if model_name == 'SVM' and not hasattr(model, '_effective_probability'):
+                            model._effective_probability = getattr(model, 'probability', False)
+                            
                         pred_enc = model.predict(text_vec)[0]
                         pred_label = label_encoder.inverse_transform([pred_enc])[0]
                         
@@ -491,7 +494,7 @@ def show_classification_page(vectorizer, label_encoder, models):
                                   for pred in predictions.values()]
                 })
                 
-                st.dataframe(pred_df, use_container_width=True)
+                st.dataframe(pred_df, width='stretch')
                 
                 # Download button
                 st.download_button(
@@ -529,7 +532,7 @@ def show_model_info_page(categories, models):
                                  for model in models.values()]
     })
     
-    st.dataframe(model_info, use_container_width=True)
+    st.dataframe(model_info, width='stretch')
     
     st.markdown("### 📋 Supported Categories")
     
