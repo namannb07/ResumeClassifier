@@ -15,6 +15,14 @@ from collections import Counter
 import warnings
 warnings.filterwarnings('ignore')
 
+from job_search import (
+    search_jobs_adzuna,
+    build_linkedin_apply_url,
+    get_linkedin_search_url,
+    map_category_to_keywords,
+    is_api_configured,
+)
+
 # Page configuration
 st.set_page_config(
     page_title="AI Resume Classifier",
@@ -60,6 +68,108 @@ st.markdown("""
         border-radius: 0.5rem;
         border-left: 4px solid #2196F3;
         margin: 1rem 0;
+    }
+    /* ── Job Card Styles ─────────────────────────────────── */
+    .job-card {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 1px solid #0f3460;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .job-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 30px rgba(15, 52, 96, 0.4);
+    }
+    .job-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: #e94560;
+        margin-bottom: 0.4rem;
+    }
+    .job-company {
+        color: #a7c5eb;
+        font-size: 0.95rem;
+        margin-bottom: 0.3rem;
+    }
+    .job-location {
+        color: #8899aa;
+        font-size: 0.9rem;
+        margin-bottom: 0.3rem;
+    }
+    .job-salary {
+        color: #4ecca3;
+        font-weight: 600;
+        font-size: 0.95rem;
+        margin-bottom: 0.5rem;
+    }
+    .job-desc {
+        color: #ccd6e0;
+        font-size: 0.88rem;
+        line-height: 1.5;
+        margin-bottom: 0.8rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .apply-btn {
+        background: linear-gradient(135deg, #0077B5, #00a0dc);
+        color: white !important;
+        padding: 0.5rem 1.5rem;
+        border-radius: 6px;
+        text-decoration: none !important;
+        display: inline-block;
+        font-weight: 600;
+        font-size: 0.9rem;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .apply-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 15px rgba(0, 119, 181, 0.4);
+        color: white !important;
+    }
+    .jobs-header {
+        background: linear-gradient(135deg, #0f3460 0%, #1a1a2e 100%);
+        padding: 1.5rem;
+        border-radius: 12px;
+        text-align: center;
+        margin: 2rem 0 1rem 0;
+        border: 1px solid #16213e;
+    }
+    .jobs-header h2 {
+        color: #e94560;
+        margin-bottom: 0.3rem;
+    }
+    .jobs-header p {
+        color: #a7c5eb;
+        font-size: 1rem;
+    }
+    .see-all-btn {
+        background: linear-gradient(135deg, #e94560, #c23152);
+        color: white !important;
+        padding: 0.75rem 2rem;
+        border-radius: 8px;
+        text-decoration: none !important;
+        display: inline-block;
+        font-weight: 700;
+        font-size: 1rem;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        margin-top: 1rem;
+    }
+    .see-all-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(233, 69, 96, 0.4);
+        color: white !important;
+    }
+    .fallback-box {
+        background: linear-gradient(135deg, #0f3460 0%, #1a1a2e 100%);
+        border: 1px solid #16213e;
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        margin: 2rem 0;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -194,6 +304,7 @@ def main():
         page = st.radio("Select Page", [
             "🏠 Home",
             "🔍 Resume Classification",
+            "💼 Job Search",
             "📊 Model Information",
             "ℹ️ About"
         ])
@@ -213,6 +324,8 @@ def main():
         show_home_page(categories)
     elif page == "🔍 Resume Classification":
         show_classification_page(vectorizer, label_encoder, models)
+    elif page == "💼 Job Search":
+        show_job_search_page()
     elif page == "📊 Model Information":
         show_model_info_page(categories, models)
     elif page == "ℹ️ About":
@@ -323,6 +436,9 @@ def show_classification_page(vectorizer, label_encoder, models):
                 consensus_category = most_common[0]
                 consensus_count = most_common[1]
                 
+                # Save consensus to session state for job search
+                st.session_state['classified_category'] = consensus_category
+
                 # Display consensus
                 st.markdown(f"""
                 <div class="prediction-box">
@@ -370,6 +486,10 @@ def show_classification_page(vectorizer, label_encoder, models):
                     mime="text/csv"
                 )
 
+                # ── Job Search Results (inline) ──────────────────────
+                st.markdown("---")
+                show_job_results(consensus_category)
+
 def show_model_info_page(categories, models):
     """Model information page"""
     
@@ -404,6 +524,91 @@ def show_model_info_page(categories, models):
         with cols[idx % num_cols]:
             st.markdown(f"✅ {category}")
 
+def show_job_results(category):
+    """Display job search results for the given category."""
+    keywords = map_category_to_keywords(category)
+
+    st.markdown(f"""
+    <div class="jobs-header">
+        <h2>💼 Job Opportunities in India</h2>
+        <p>Searching jobs for <strong>"{keywords}"</strong> based on your resume</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if is_api_configured():
+        with st.spinner("🔍 Searching for jobs in India..."):
+            jobs = search_jobs_adzuna(category, num_results=10)
+
+        if jobs:
+            st.success(f"Found {len(jobs)} job(s) matching your profile!")
+
+            for i, job in enumerate(jobs):
+                # Build salary display
+                salary_str = ""
+                if job['salary_min'] and job['salary_max']:
+                    salary_str = f"💰 ₹{job['salary_min']:,.0f} – ₹{job['salary_max']:,.0f}"
+                elif job['salary_min']:
+                    salary_str = f"💰 From ₹{job['salary_min']:,.0f}"
+                elif job['salary_max']:
+                    salary_str = f"💰 Up to ₹{job['salary_max']:,.0f}"
+
+                # Truncate description
+                desc = job['description'][:250] + "..." if len(job['description']) > 250 else job['description']
+
+                # LinkedIn apply URL
+                linkedin_url = build_linkedin_apply_url(job['title'], job['company'])
+
+                st.markdown(f"""
+                <div class="job-card">
+                    <div class="job-title">{job['title']}</div>
+                    <div class="job-company">🏢 {job['company']}</div>
+                    <div class="job-location">📍 {job['location']}</div>
+                    {f'<div class="job-salary">{salary_str}</div>' if salary_str else ''}
+                    <div class="job-desc">{desc}</div>
+                    <a href="{linkedin_url}" target="_blank" class="apply-btn">
+                        🔗 Apply on LinkedIn
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.warning("No jobs found from Adzuna. Try the LinkedIn search below!")
+    else:
+        st.markdown("""
+        <div class="fallback-box">
+            <p style="color: #a7c5eb; font-size: 1.1rem;">💡 Configure your free Adzuna API key in
+            <code>.streamlit/secrets.toml</code> to see job listings directly in the app.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # "See All Jobs on LinkedIn" button at the bottom
+    linkedin_search = get_linkedin_search_url(category)
+    st.markdown(f"""
+    <div style="text-align: center; margin: 1.5rem 0;">
+        <a href="{linkedin_search}" target="_blank" class="see-all-btn">
+            🔍 See All {category} Jobs on LinkedIn →
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def show_job_search_page():
+    """Standalone Job Search page — uses the last classified category."""
+    st.header("💼 Job Search")
+
+    if 'classified_category' in st.session_state:
+        category = st.session_state['classified_category']
+        st.info(f"Showing jobs based on your last classification: **{category}**")
+        show_job_results(category)
+    else:
+        st.markdown("""
+        <div class="fallback-box">
+            <h3 style="color: #e94560;">📄 No Resume Classified Yet</h3>
+            <p style="color: #a7c5eb;">Go to <strong>🔍 Resume Classification</strong> first,
+            upload your resume, and classify it. Job results will then appear here automatically.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+
 def show_about_page():
     """About page"""
     
@@ -436,6 +641,7 @@ def show_about_page():
     - **NLP**: NLTK
     - **PDF Processing**: PyPDF2
     - **Visualization**: Plotly
+    - **Job Search**: Adzuna API
     
     ### 📝 Deployment
     
