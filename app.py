@@ -416,19 +416,34 @@ def show_classification_page(vectorizer, label_encoder, models):
                 st.subheader("🎯 Classification Results")
                 
                 predictions = {}
+                failed_models = []
                 for model_name, model in models.items():
-                    pred_enc = model.predict(text_vec)[0]
-                    pred_label = label_encoder.inverse_transform([pred_enc])[0]
-                    
-                    if hasattr(model, "predict_proba"):
-                        prob = np.max(model.predict_proba(text_vec))
-                    else:
-                        prob = None
-                    
-                    predictions[model_name] = {
-                        'category': pred_label,
-                        'confidence': prob
-                    }
+                    try:
+                        pred_enc = model.predict(text_vec)[0]
+                        pred_label = label_encoder.inverse_transform([pred_enc])[0]
+                        
+                        try:
+                            if hasattr(model, "predict_proba"):
+                                prob = np.max(model.predict_proba(text_vec))
+                            else:
+                                prob = None
+                        except Exception:
+                            prob = None
+                        
+                        predictions[model_name] = {
+                            'category': pred_label,
+                            'confidence': prob
+                        }
+                    except Exception as e:
+                        failed_models.append((model_name, str(e)))
+                
+                if failed_models:
+                    for fname, ferr in failed_models:
+                        st.warning(f"⚠️ **{fname}** skipped due to compatibility issue: {ferr}")
+                
+                if not predictions:
+                    st.error("❌ All models failed to make predictions. Please check model compatibility.")
+                    return
                 
                 # Consensus prediction
                 pred_categories = [pred['category'] for pred in predictions.values()]
